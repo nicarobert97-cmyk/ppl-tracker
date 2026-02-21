@@ -411,6 +411,7 @@
   }
   .empty-state-icon { font-size: 48px; margin-bottom: 12px; }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -870,7 +871,16 @@ function renderSettings() {
     ...LEGS_EXERCISES.map(e => ({...e, group: 'LEGS'})),
   ];
 
-  let html = `<div class="settings-page"><div class="settings-title">⚙ SETĂRI PROGRESIE</div>`;
+  let html = `<div class="settings-page">
+  <div class="settings-title">⚙ SETĂRI PROGRESIE</div>
+  <button onclick="exportToExcel()" style="
+    width:100%; padding:16px; margin-bottom:20px;
+    background:linear-gradient(135deg,#1a2e1a,#1a3a1a);
+    border:1.5px solid var(--increase); border-radius:14px;
+    color:var(--increase); font-family:'Bebas Neue',sans-serif;
+    font-size:20px; letter-spacing:2px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+  "><span>⬇</span> EXPORT EXCEL (.xlsx)</button>`;
   
   let lastGroup = '';
   for (const ex of allExercises) {
@@ -937,6 +947,106 @@ function renderOverview() {
   }
   html += `</div>`;
   document.getElementById('overviewContent').innerHTML = html;
+}
+
+
+// ============================================================
+// EXPORT TO EXCEL
+// ============================================================
+
+function exportToExcel() {
+  if (typeof XLSX === 'undefined') {
+    alert('Se încarcă librăria Excel, încearcă din nou în câteva secunde...');
+    return;
+  }
+
+  const wb = XLSX.utils.book_new();
+
+  // Settings sheet
+  const settingsData = [['Exercise', 'Step + (kg)', 'Step - (kg)']];
+  const allEx = [...PUSH_EXERCISES, ...PULL_EXERCISES, ...LEGS_EXERCISES];
+  for (const ex of allEx) {
+    const s = state.settings[ex.name] || {up:2.5, down:2.5};
+    settingsData.push([ex.name, s.up, s.down]);
+  }
+  const wsSettings = XLSX.utils.aoa_to_sheet(settingsData);
+  wsSettings['!cols'] = [{wch:35},{wch:12},{wch:12}];
+  XLSX.utils.book_append_sheet(wb, wsSettings, 'Settings');
+
+  // Generate workout sheets
+  const workoutDefs = [
+    { key: 'push', label: 'Push Plan', exercises: PUSH_EXERCISES },
+    { key: 'pull', label: 'Pull Plan', exercises: PULL_EXERCISES },
+    { key: 'legs', label: 'Legs Plan', exercises: LEGS_EXERCISES },
+  ];
+
+  for (const w of workoutDefs) {
+    const rows = [];
+    const merges = [];
+    let rowIdx = 0;
+
+    for (let weekIdx = 0; weekIdx < WEEKS.length; weekIdx++) {
+      // Week header
+      rows.push([WEEKS[weekIdx]]);
+      merges.push({ s:{r:rowIdx,c:0}, e:{r:rowIdx,c:w.key==='push'?16:12} });
+      rowIdx++;
+
+      // Column headers row 1
+      const setCount = w.key === 'push' ? 4 : 3;
+      const h1 = ['Exercise'];
+      for (let s = 1; s <= setCount; s++) {
+        h1.push(`Set ${s}`, '', '', '', '');
+      }
+      rows.push(h1);
+      rowIdx++;
+
+      // Column headers row 2
+      const h2 = [''];
+      for (let s = 0; s < setCount; s++) {
+        h2.push('Kg', 'Target Reps', 'Actual Reps', 'Δ', '');
+      }
+      rows.push(h2);
+      rowIdx++;
+
+      // Exercise rows
+      for (const ex of w.exercises) {
+        const row = [ex.name];
+        for (let si = 0; si < ex.sets; si++) {
+          const kg = getKg(w.key, weekIdx, ex.name, si);
+          const target = ex.targets[si];
+          const targetStr = target.min === target.max ? `${target.min}` : `${target.min}-${target.max}`;
+          const actual = getActualReps(w.key, weekIdx, ex.name, si);
+          const delta = actual !== '' ? Number(actual) - target.max : '';
+          row.push(kg, targetStr, actual !== '' ? actual : '', delta, '');
+        }
+        // Decision
+        const decision = getDecision(w.key, weekIdx, ex.name);
+        row.push(decision || '');
+        rows.push(row);
+        rowIdx++;
+      }
+
+      // Blank separator
+      rows.push([]);
+      rowIdx++;
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!merges'] = merges;
+
+    // Column widths
+    const cols = [{wch:30}];
+    const setCount = w.key === 'push' ? 4 : 3;
+    for (let s = 0; s < setCount; s++) {
+      cols.push({wch:8},{wch:12},{wch:12},{wch:6},{wch:4});
+    }
+    cols.push({wch:12});
+    ws['!cols'] = cols;
+
+    XLSX.utils.book_append_sheet(wb, ws, w.label);
+  }
+
+  XLSX.writeFile(wb, 'Push_Pull_Legs_Tracker.xlsx');
 }
 
 // ============================================================
