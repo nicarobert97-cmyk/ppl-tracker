@@ -960,93 +960,221 @@ function exportToExcel() {
     return;
   }
 
-  const wb = XLSX.utils.book_new();
+  // ── helpers ──────────────────────────────────────────────
+  const solidFill = hex => ({
+    patternType: 'solid',
+    fgColor: { rgb: hex },
+    bgColor: { rgb: hex }
+  });
 
-  // Settings sheet
-  const settingsData = [['Exercise', 'Step + (kg)', 'Step - (kg)']];
-  const allEx = [...PUSH_EXERCISES, ...PULL_EXERCISES, ...LEGS_EXERCISES];
-  for (const ex of allEx) {
-    const s = state.settings[ex.name] || {up:2.5, down:2.5};
-    settingsData.push([ex.name, s.up, s.down]);
-  }
-  const wsSettings = XLSX.utils.aoa_to_sheet(settingsData);
-  wsSettings['!cols'] = [{wch:35},{wch:12},{wch:12}];
-  XLSX.utils.book_append_sheet(wb, wsSettings, 'Settings');
+  const border = {
+    top:    { style: 'thin', color: { rgb: 'FFBFBFBF' } },
+    bottom: { style: 'thin', color: { rgb: 'FFBFBFBF' } },
+    left:   { style: 'thin', color: { rgb: 'FFBFBFBF' } },
+    right:  { style: 'thin', color: { rgb: 'FFBFBFBF' } }
+  };
 
-  // Generate workout sheets
-  const workoutDefs = [
-    { key: 'push', label: 'Push Plan', exercises: PUSH_EXERCISES },
-    { key: 'pull', label: 'Pull Plan', exercises: PULL_EXERCISES },
-    { key: 'legs', label: 'Legs Plan', exercises: LEGS_EXERCISES },
-  ];
+  const makeCell = (v, fillHex, fontColorHex, bold) => {
+    const c = { v, t: typeof v === 'number' ? 'n' : 's' };
+    if (v === null || v === undefined || v === '') { c.v = ''; c.t = 's'; }
+    c.s = {
+      font:      { bold: !!bold, color: { rgb: fontColorHex || 'FF111111' }, name: 'Calibri', sz: 11 },
+      fill:      fillHex ? solidFill(fillHex) : { patternType: 'none' },
+      border,
+      alignment: { vertical: 'center', wrapText: false }
+    };
+    return c;
+  };
 
-  for (const w of workoutDefs) {
-    const rows = [];
+  // Colors
+  const C_WEEK_HDR  = 'FF0B2F4D';  // dark navy
+  const C_SET_HDR1  = 'FF1F4E78';  // dark blue
+  const C_SET_HDR2  = 'FF305496';  // medium blue
+  const C_WHITE     = 'FFFFFFFF';
+  const C_DARK      = 'FF111111';
+  const SET_FILLS   = ['FFD9F2D9', 'FFFFF2CC', 'FFFCE4D6', 'FFF8CBAD']; // green,yellow,peach,orange
+  const C_EX_NAME   = 'FFFFFFFF'; // exercise name background
+
+  // ── build a workout sheet ─────────────────────────────────
+  function buildWorkoutSheet(wKey, exercises) {
+    const ws = {};
     const merges = [];
-    let rowIdx = 0;
+    let R = 0; // 0-indexed row
 
-    for (let weekIdx = 0; weekIdx < WEEKS.length; weekIdx++) {
-      // Week header
-      rows.push([WEEKS[weekIdx]]);
-      merges.push({ s:{r:rowIdx,c:0}, e:{r:rowIdx,c:w.key==='push'?16:12} });
-      rowIdx++;
+    const setCount = wKey === 'push' ? 4 : 3;
+    // last visible col index (0-based): A + setCount*4 cols = col 1+setCount*4
+    const lastVisCol = setCount * 4; // col index of last Δ col
 
-      // Column headers row 1
-      const setCount = w.key === 'push' ? 4 : 3;
-      const h1 = ['Exercise'];
-      for (let s = 1; s <= setCount; s++) {
-        h1.push(`Set ${s}`, '', '', '', '');
+    // col letters for sets: B,C,D,E | F,G,H,I | J,K,L,M | N,O,P,Q
+    const setStartCols = [1, 5, 9, 13]; // 0-based col indices
+
+    for (let weekIdx = 0; weekIdx < 12; weekIdx++) {
+      // ── Row 0 of block: Week header ──
+      const weekLabel = [
+        'Week 1 (23 Feb - 01 Mar)','Week 2 (02 Mar - 08 Mar)','Week 3 (09 Mar - 15 Mar)',
+        'Week 4 (16 Mar - 22 Mar)','Week 5 (23 Mar - 29 Mar)','Week 6 (30 Mar - 05 Apr)',
+        'Week 7 (06 Apr - 12 Apr)','Week 8 (13 Apr - 19 Apr)','Week 9 (20 Apr - 26 Apr)',
+        'Week 10 (27 Apr - 03 May)','Week 11 (04 May - 10 May)','Week 12 (11 May - 17 May)',
+      ][weekIdx];
+
+      const wHdrAddr = XLSX.utils.encode_cell({r:R, c:0});
+      ws[wHdrAddr] = makeCell(weekLabel, C_WEEK_HDR, C_WHITE, true);
+      ws[wHdrAddr].s.font.sz = 13;
+      // fill rest of week header row with same style (for merge display)
+      for (let c = 1; c <= lastVisCol; c++) {
+        ws[XLSX.utils.encode_cell({r:R, c})] = makeCell('', C_WEEK_HDR, C_WHITE, true);
       }
-      rows.push(h1);
-      rowIdx++;
+      merges.push({ s:{r:R,c:0}, e:{r:R,c:lastVisCol} });
+      R++;
 
-      // Column headers row 2
-      const h2 = [''];
-      for (let s = 0; s < setCount; s++) {
-        h2.push('Kg', 'Target Reps', 'Actual Reps', 'Δ', '');
+      // ── Row 1 of block: Set group headers ──
+      ws[XLSX.utils.encode_cell({r:R,c:0})] = makeCell('Exercise', C_SET_HDR1, C_WHITE, true);
+      for (let si = 0; si < setCount; si++) {
+        const sc = setStartCols[si];
+        ws[XLSX.utils.encode_cell({r:R,c:sc})] = makeCell(`Set ${si+1}`, C_SET_HDR1, C_WHITE, true);
+        // merge Set N across 4 cols (Kg,Target,Actual,Δ)
+        merges.push({ s:{r:R,c:sc}, e:{r:R,c:sc+3} });
+        for (let x=1;x<4;x++) ws[XLSX.utils.encode_cell({r:R,c:sc+x})] = makeCell('', C_SET_HDR1, C_WHITE, true);
       }
-      rows.push(h2);
-      rowIdx++;
+      // merge Exercise cell across rows (rows R and R+1)
+      merges.push({ s:{r:R,c:0}, e:{r:R+1,c:0} });
+      R++;
 
-      // Exercise rows
-      for (const ex of w.exercises) {
-        const row = [ex.name];
+      // ── Row 2 of block: Column sub-headers ──
+      ws[XLSX.utils.encode_cell({r:R,c:0})] = makeCell('', C_SET_HDR2, C_WHITE, true);
+      for (let si = 0; si < setCount; si++) {
+        const sc = setStartCols[si];
+        ws[XLSX.utils.encode_cell({r:R,c:sc})]   = makeCell('Kg',          C_SET_HDR2, C_WHITE, true);
+        ws[XLSX.utils.encode_cell({r:R,c:sc+1})] = makeCell('Target Reps', C_SET_HDR2, C_WHITE, true);
+        ws[XLSX.utils.encode_cell({r:R,c:sc+2})] = makeCell('Actual Reps', C_SET_HDR2, C_WHITE, true);
+        ws[XLSX.utils.encode_cell({r:R,c:sc+3})] = makeCell('Δ',           C_SET_HDR2, C_WHITE, true);
+      }
+      R++;
+
+      // ── Exercise rows ──
+      for (const ex of exercises) {
+        // Col A: exercise name
+        ws[XLSX.utils.encode_cell({r:R,c:0})] = makeCell(ex.name, C_EX_NAME, C_DARK, true);
+
         for (let si = 0; si < ex.sets; si++) {
-          const kg = getKg(w.key, weekIdx, ex.name, si);
+          const sc = setStartCols[si];
+          const fill = SET_FILLS[si];
+          const kg = getKg(wKey, weekIdx, ex.name, si);
           const target = ex.targets[si];
           const targetStr = target.min === target.max ? `${target.min}` : `${target.min}-${target.max}`;
-          const actual = getActualReps(w.key, weekIdx, ex.name, si);
-          const delta = actual !== '' ? Number(actual) - target.max : '';
-          row.push(kg, targetStr, actual !== '' ? actual : '', delta, '');
+          const actual = getActualReps(wKey, weekIdx, ex.name, si);
+          const actualNum = actual !== '' ? Number(actual) : null;
+          const delta = actualNum !== null ? actualNum - target.max : null;
+
+          ws[XLSX.utils.encode_cell({r:R,c:sc})]   = makeCell(kg,          fill, C_DARK, true);
+          ws[XLSX.utils.encode_cell({r:R,c:sc+1})] = makeCell(targetStr,   fill, C_DARK, true);
+          ws[XLSX.utils.encode_cell({r:R,c:sc+2})] = makeCell(actualNum !== null ? actualNum : '', fill, C_DARK, true);
+          const deltaCell = makeCell(delta !== null ? delta : '', fill, C_DARK, true);
+          if (delta !== null) {
+            if (delta > 0) deltaCell.s.font.color = { rgb: 'FF1F7A1F' };
+            else if (delta < 0) deltaCell.s.font.color = { rgb: 'FFCC0000' };
+          }
+          ws[XLSX.utils.encode_cell({r:R,c:sc+3})] = deltaCell;
         }
-        // Decision
-        const decision = getDecision(w.key, weekIdx, ex.name);
-        row.push(decision || '');
-        rows.push(row);
-        rowIdx++;
+
+        // Decision cell (after last set)
+        const decision = getDecision(wKey, weekIdx, ex.name);
+        const decCell = makeCell(decision || '', null, 'FF111111', true);
+        if (decision === 'INCREASE') { decCell.s.font.color = {rgb:'FF1F7A1F'}; decCell.s.fill = solidFill('FFE2EFDA'); }
+        else if (decision === 'DECREASE') { decCell.s.font.color = {rgb:'FFCC0000'}; decCell.s.fill = solidFill('FFFCE4D6'); }
+        else if (decision === 'HOLD') { decCell.s.font.color = {rgb:'FF7F6000'}; decCell.s.fill = solidFill('FFFFF2CC'); }
+        ws[XLSX.utils.encode_cell({r:R,c:lastVisCol+1})] = decCell;
+
+        R++;
       }
 
-      // Blank separator
-      rows.push([]);
-      rowIdx++;
+      // blank separator row
+      R++;
     }
 
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+    // Sheet dimensions
+    const ref = XLSX.utils.encode_range({s:{r:0,c:0}, e:{r:R,c:lastVisCol+2}});
+    ws['!ref'] = ref;
     ws['!merges'] = merges;
 
-    // Column widths
-    const cols = [{wch:30}];
-    const setCount = w.key === 'push' ? 4 : 3;
-    for (let s = 0; s < setCount; s++) {
-      cols.push({wch:8},{wch:12},{wch:12},{wch:6},{wch:4});
+    // Column widths (matching original)
+    const wCols = [{wch:40}];
+    for (let s=0; s<setCount; s++) {
+      wCols.push({wch:9},{wch:14},{wch:12},{wch:7});
     }
-    cols.push({wch:12});
-    ws['!cols'] = cols;
+    wCols.push({wch:13}); // decision col
+    ws['!cols'] = wCols;
 
-    XLSX.utils.book_append_sheet(wb, ws, w.label);
+    // Row heights
+    const rowHeights = {};
+    let rr = 0;
+    for (let w=0; w<12; w++) {
+      rowHeights[rr] = 26.1;   // week header
+      rowHeights[rr+1] = 21.95; // set header 1
+      rowHeights[rr+2] = 21.95; // set header 2
+      const exCount = exercises.length;
+      for (let e=0; e<exCount; e++) rowHeights[rr+3+e] = 20.1;
+      rr += 3 + exCount + 1; // +1 blank
+    }
+    ws['!rows'] = Object.entries(rowHeights).map(([idx,ht]) => {
+      const arr = [];
+      arr[parseInt(idx)] = {hpt: ht};
+      return null;
+    }).filter(Boolean);
+    // Set row heights properly
+    const rowsArr = [];
+    for (const [idx,ht] of Object.entries(rowHeights)) {
+      rowsArr[parseInt(idx)] = {hpt: ht};
+    }
+    ws['!rows'] = rowsArr;
+
+    return ws;
   }
 
-  XLSX.writeFile(wb, 'Push_Pull_Legs_Tracker.xlsx');
+  // ── Settings sheet ────────────────────────────────────────
+  function buildSettingsSheet() {
+    const ws = {};
+    const allEx = [...PUSH_EXERCISES, ...PULL_EXERCISES, ...LEGS_EXERCISES];
+
+    ws['A1'] = makeCell('Exercise',    'FF1F4E78', C_WHITE, true);
+    ws['B1'] = makeCell('Step + (kg)', 'FF1F4E78', C_WHITE, true);
+    ws['C1'] = makeCell('Step - (kg)', 'FF1F4E78', C_WHITE, true);
+    ws['A1'].s.font.sz = 11;
+
+    for (let i=0; i<allEx.length; i++) {
+      const ex = allEx[i];
+      const s = state.settings[ex.name] || {up:2.5,down:2.5};
+      const fill = i%2===0 ? 'FFD9E1F2' : 'FFFFFFFF';
+      ws[XLSX.utils.encode_cell({r:i+1,c:0})] = makeCell(ex.name, fill, C_DARK, true);
+      ws[XLSX.utils.encode_cell({r:i+1,c:1})] = makeCell(s.up,    fill, C_DARK, true);
+      ws[XLSX.utils.encode_cell({r:i+1,c:2})] = makeCell(s.down,  fill, C_DARK, true);
+    }
+
+    ws['!ref'] = XLSX.utils.encode_range({s:{r:0,c:0},e:{r:allEx.length,c:2}});
+    ws['!cols'] = [{wch:35},{wch:12},{wch:12}];
+    const rh = [{hpt:24}];
+    for (let i=0;i<allEx.length;i++) rh.push({hpt:20.1});
+    ws['!rows'] = rh;
+    return ws;
+  }
+
+  // ── Build workbook ────────────────────────────────────────
+  const wb = { SheetNames: [], Sheets: {}, Props: {} };
+
+  wb.SheetNames.push('Settings');
+  wb.Sheets['Settings'] = buildSettingsSheet();
+
+  const workoutDefs = [
+    { key:'push', label:'Push Plan', exercises:PUSH_EXERCISES },
+    { key:'pull', label:'Pull Plan', exercises:PULL_EXERCISES },
+    { key:'legs', label:'Legs Plan', exercises:LEGS_EXERCISES },
+  ];
+  for (const w of workoutDefs) {
+    wb.SheetNames.push(w.label);
+    wb.Sheets[w.label] = buildWorkoutSheet(w.key, w.exercises);
+  }
+
+  XLSX.writeFile(wb, 'Push_Pull_Legs_Tracker.xlsx', { cellStyles: true });
 }
 
 // ============================================================
