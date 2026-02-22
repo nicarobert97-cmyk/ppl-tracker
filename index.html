@@ -872,18 +872,14 @@ function renderSettings() {
 
   let html = `<div class="settings-page">
   <div class="settings-title">⚙ SETĂRI PROGRESIE</div>
-  <button onclick="copyForExcel(this)" style="
-    width:100%; padding:16px; margin-bottom:8px;
+  <button onclick="downloadExcel(this)" style="
+    width:100%; padding:16px; margin-bottom:20px;
     background:linear-gradient(135deg,#1a2e1a,#1a3a1a);
     border:1.5px solid var(--increase); border-radius:14px;
     color:var(--increase); font-family:'Bebas Neue',sans-serif;
     font-size:20px; letter-spacing:2px; cursor:pointer;
     display:flex; align-items:center; justify-content:center; gap:10px;
-  " id="exportBtn"><span>📋</span> COPIAZĂ DATE PENTRU EXCEL</button>
-  <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);padding:10px 4px;line-height:1.7;">
-    Lipește datele copiate într-un mesaj pe <strong style="color:var(--text)">claude.ai</strong><br>
-    și scrie <span style="color:var(--increase)">"Generează Excel"</span> — primeşti fişierul instant.
-  </div>`;
+  " id="exportBtn"><span>⬇</span> DESCARCĂ EXCEL</button>`;
   
   let lastGroup = '';
   for (const ex of allExercises) {
@@ -959,28 +955,37 @@ function renderOverview() {
 
 
 // ============================================================
-// EXPORT - copy data to clipboard for Excel generation
+// EXPORT - download Excel directly via API
 // ============================================================
 
-function copyForExcel(btn) {
-  const json = JSON.stringify({ settings: state.settings, data: state.data });
-  const copy = (text) => {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text);
-    }
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
-    document.body.appendChild(ta);
-    ta.focus(); ta.select(); ta.setSelectionRange(0,99999);
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    return Promise.resolve();
-  };
-  copy(json).then(() => {
-    btn.innerHTML = '<span>✅</span> COPIAT!';
-    setTimeout(() => { btn.innerHTML = '<span>📋</span> COPIAZĂ DATE PENTRU EXCEL'; }, 3000);
-  }).catch(e => alert('Nu s-a putut copia: ' + e));
+async function downloadExcel(btn) {
+  const API_URL = 'https://web-production-23396.up.railway.app/export';
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<span>⏳</span> SE GENEREAZĂ...';
+  btn.disabled = true;
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: state.settings, data: state.data })
+    });
+    if (!response.ok) throw new Error('Server error: ' + response.status);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Push_Pull_Legs_Tracker.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    btn.innerHTML = '<span>✅</span> DESCĂRCAT!';
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 3000);
+  } catch(e) {
+    alert('Eroare la descărcare: ' + e.message);
+    btn.innerHTML = orig;
+    btn.disabled = false;
+  }
 }
 
 
