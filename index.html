@@ -101,12 +101,7 @@
     align-items: center;
     justify-content: center;
     gap: 16px;
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--border);
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background: var(--bg);
+    padding: 10px 20px 0;
   }
   .week-btn {
     width: 36px; height: 36px;
@@ -217,6 +212,12 @@
     line-height: 1.5;
   }
   .prev-reps {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+  }
+  .reps-diff {
     font-family: 'DM Mono', monospace;
     font-size: 10px;
     font-weight: bold;
@@ -433,6 +434,11 @@
     <button class="tab push active" onclick="switchWorkout('push')">PUSH</button>
     <button class="tab pull" onclick="switchWorkout('pull')">PULL</button>
     <button class="tab legs" onclick="switchWorkout('legs')">LEGS</button>
+  </div>
+  <div class="week-nav" id="weekNav">
+    <button class="week-btn" id="weekBtnPrev" onclick="changeWeek(-1)">‹</button>
+    <div class="week-title" id="weekTitle"></div>
+    <button class="week-btn" id="weekBtnNext" onclick="changeWeek(1)">›</button>
   </div>
 </div>
 
@@ -710,12 +716,12 @@ function renderMain() {
   const exercises = getExercises(workout);
   const color = workout === 'push' ? 'var(--push)' : workout === 'pull' ? 'var(--pull)' : 'var(--legs)';
 
+  // Update static week-nav in header
+  document.getElementById('weekTitle').textContent = WEEKS[week] || `Săptămâna ${week+1}`;
+  document.getElementById('weekBtnPrev').disabled = (week === 0);
+  document.getElementById('weekBtnNext').disabled = (week >= WEEKS.length - 1);
+
   let html = `
-    <div class="week-nav">
-      <button class="week-btn" onclick="changeWeek(-1)" ${week === 0 ? 'disabled' : ''}>‹</button>
-      <div class="week-title">${WEEKS[week] || `Săptămâna ${week+1}`}</div>
-      <button class="week-btn" onclick="changeWeek(1)" ${week >= WEEKS.length - 1 ? 'disabled' : ''}>›</button>
-    </div>
     <div class="exercises-list">
   `;
 
@@ -772,6 +778,19 @@ function renderMain() {
           else if (kg < prevKg) prevColor = '#f44336';  // rosu - greutate mai mica
           else prevColor = '#FFC107';                    // galben - aceeasi greutate
           prevRepsHtml = `<span class="prev-reps" style="color:${prevColor}">↩ ${prevActual} rep</span>`;
+
+          // Daca greutatea e aceeasi, arata diferenta de repetari
+          if (kg === prevKg) {
+            const curActual = getActualReps(workout, week, ex.name, i);
+            if (curActual !== '' && curActual !== null) {
+              const diff = Number(curActual) - Number(prevActual);
+              if (diff > 0) {
+                prevRepsHtml += ` <span class="reps-diff" style="color:#4CAF50">+${diff}</span>`;
+              } else if (diff < 0) {
+                prevRepsHtml += ` <span class="reps-diff" style="color:#f44336">${diff}</span>`;
+              }
+            }
+          }
         }
       }
 
