@@ -103,6 +103,10 @@
     gap: 16px;
     padding: 14px 20px;
     border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg);
   }
   .week-btn {
     width: 36px; height: 36px;
@@ -211,6 +215,12 @@
     color: var(--muted);
     flex: 1;
     line-height: 1.5;
+  }
+  .prev-reps {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
   }
   .reps-input-wrap {
     display: flex;
@@ -526,7 +536,7 @@ const INITIAL_KG = {
     'Close Grip Lat Pulldown': [55, 55, 55],
     'Seated Cable Row': [45, 45, 45],
     'Wide Grip Seated Cable Row': [40, 40, 40],
-    'Incline Dumbbell Curl': [10, 10],
+    'Incline Dumbbell Curl': [10, 10, 10],
     'Machine Bicep Curl': [22.5, 22.5, 22.5],
   },
   legs: {
@@ -568,6 +578,7 @@ let state = {
   },
   // data[workout][week][exerciseName][setIndex] = actualReps
   data: {},
+  photos: {},
 };
 
 function loadState() {
@@ -750,6 +761,20 @@ function renderMain() {
         inputClass = Number(actual) >= target.min ? 'good' : 'bad';
       }
 
+      // Previous week reps and kg comparison
+      let prevRepsHtml = '';
+      if (week > 0) {
+        const prevActual = getActualReps(workout, week - 1, ex.name, i);
+        const prevKg = getKg(workout, week - 1, ex.name, i);
+        if (prevActual !== '' && prevActual !== null) {
+          let prevColor;
+          if (kg > prevKg) prevColor = '#4CAF50';       // verde - greutate mai mare
+          else if (kg < prevKg) prevColor = '#f44336';  // rosu - greutate mai mica
+          else prevColor = '#FFC107';                    // galben - aceeasi greutate
+          prevRepsHtml = `<span class="prev-reps" style="color:${prevColor}">↩ ${prevActual} rep</span>`;
+        }
+      }
+
       html += `
         <div class="set-row">
           <div class="set-label">Set ${i+1}</div>
@@ -758,7 +783,7 @@ function renderMain() {
               <div class="set-kg" style="color:${color}">${kg}</div>
               <div class="set-kg-unit">KG</div>
             </div>
-            <div class="set-target">Target:<br>${targetStr}</div>
+            <div class="set-target">Target:<br>${targetStr}${prevRepsHtml ? `<br>${prevRepsHtml}` : ''}</div>
             <div class="reps-input-wrap">
               <span class="reps-input-label">Repetări</span>
               <input
@@ -786,6 +811,30 @@ function renderMain() {
 
     html += `</div></div>`;
   }
+
+  // Photo button at end of week
+  const photoKey = `photo_${workout}_${week}`;
+  const hasPhoto = !!state.photos[photoKey];
+  html += `
+    <div style="margin:18px 0 8px 0;">
+      <label for="photoInput_${workout}_${week}" style="
+        display:flex; align-items:center; justify-content:center; gap:10px;
+        width:100%; padding:14px;
+        background:var(--surface2);
+        border:1.5px solid ${hasPhoto ? 'var(--increase)' : 'var(--border)'};
+        border-radius:14px;
+        color:${hasPhoto ? 'var(--increase)' : 'var(--muted)'};
+        font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:2px;
+        cursor:pointer;
+      ">
+        <span>${hasPhoto ? '✅' : '📷'}</span>
+        ${hasPhoto ? 'POZA ADĂUGATĂ' : 'ADAUGĂ POZA ANTRENAMENTULUI'}
+      </label>
+      <input type="file" id="photoInput_${workout}_${week}" accept="image/*"
+        style="display:none"
+        onchange="savePhoto('${workout}', ${week}, this)">
+    </div>
+  `;
 
   html += `</div>`;
   document.getElementById('mainContent').innerHTML = html;
@@ -955,8 +1004,23 @@ function renderOverview() {
 
 
 // ============================================================
-// EXPORT - download Excel directly via API
+// PHOTOS
 // ============================================================
+
+function savePhoto(workout, week, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const key = `photo_${workout}_${week}`;
+    state.photos[key] = e.target.result; // base64
+    saveState();
+    renderMain(); // refresh to show green button
+  };
+  reader.readAsDataURL(file);
+}
+
+
 
 async function downloadExcel(btn) {
   const API_URL = 'https://web-production-23396.up.railway.app/export';
@@ -967,7 +1031,7 @@ async function downloadExcel(btn) {
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settings: state.settings, data: state.data })
+      body: JSON.stringify({ settings: state.settings, data: state.data, photos: state.photos })
     });
     if (!response.ok) throw new Error('Server error: ' + response.status);
     const blob = await response.blob();
