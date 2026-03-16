@@ -162,7 +162,27 @@
     border-radius: 20px;
     white-space: nowrap;
     margin-left: 8px;
+    border: none;
+    cursor: pointer;
   }
+  .decision-badge.overridden {
+    outline: 2px dashed rgba(255,255,255,0.5);
+    outline-offset: 2px;
+  }
+  .override-btn {
+    width: 100%;
+    padding: 13px;
+    border-radius: 12px;
+    border: none;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    letter-spacing: 2px;
+    cursor: pointer;
+  }
+  .override-btn.INCREASE { background: #E2EFDA; color: #1F7A1F; }
+  .override-btn.HOLD     { background: #FFF2CC; color: #7F6000; }
+  .override-btn.DECREASE { background: #FCE4D6; color: #CC0000; }
+  .override-btn.RESET    { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
   .decision-badge.INCREASE { background: rgba(77,255,145,0.15); color: var(--increase); border: 1px solid rgba(77,255,145,0.3); }
   .decision-badge.HOLD { background: rgba(255,217,77,0.15); color: var(--hold); border: 1px solid rgba(255,217,77,0.3); }
   .decision-badge.DECREASE { background: rgba(255,107,77,0.15); color: var(--decrease); border: 1px solid rgba(255,107,77,0.3); }
@@ -442,6 +462,20 @@
   </div>
 </div>
 
+<div id="overrideModal" style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,0.7); align-items:center; justify-content:center;">
+  <div style="background:var(--surface); border-radius:20px; padding:28px 24px; width:88%; max-width:340px; border:1px solid var(--border);">
+    <div style="font-family:'Bebas Neue',sans-serif; font-size:20px; letter-spacing:2px; color:var(--text); margin-bottom:6px;" id="modalExName"></div>
+    <div style="font-family:'DM Mono',monospace; font-size:11px; color:var(--muted); margin-bottom:20px;">Alege decizia pentru săptămâna următoare</div>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <button class="override-btn INCREASE" onclick="setOverride('INCREASE')">↑ CREȘTE greutatea</button>
+      <button class="override-btn HOLD"     onclick="setOverride('HOLD')">— MENȚINE greutatea</button>
+      <button class="override-btn DECREASE" onclick="setOverride('DECREASE')">↓ SCADE greutatea</button>
+      <button class="override-btn RESET"    onclick="setOverride(null)">⟳ Resetează la automat</button>
+    </div>
+    <button onclick="closeOverrideModal()" style="margin-top:16px; width:100%; padding:10px; background:transparent; border:1px solid var(--border); border-radius:10px; color:var(--muted); font-family:'DM Sans',sans-serif; cursor:pointer;">Anulează</button>
+  </div>
+</div>
+
 <div id="mainContent"></div>
 <div id="settingsContent" style="display:none"></div>
 <div id="overviewContent" style="display:none"></div>
@@ -585,6 +619,7 @@ let state = {
   // data[workout][week][exerciseName][setIndex] = actualReps
   data: {},
   photos: {},
+  overrides: {},
 };
 
 function loadState() {
@@ -641,6 +676,12 @@ function getKg(workout, week, exerciseName, setIdx) {
 
 // Calculate decision for a week
 function getDecision(workout, week, exerciseName) {
+  // Check manual override first
+  const overrideKey = `${workout}_${week}_${exerciseName}`;
+  if (state.overrides && state.overrides[overrideKey]) {
+    return state.overrides[overrideKey];
+  }
+
   const exercises = getExercises(workout);
   const ex = exercises.find(e => e.name === exerciseName);
   if (!ex) return '';
@@ -738,7 +779,13 @@ function renderMain() {
     let badgeHtml = '';
     if (thisDecision) {
       const labels = { INCREASE: '↑ CREȘTE', HOLD: '— MENȚINE', DECREASE: '↓ SCADE' };
-      badgeHtml = `<span class="decision-badge ${thisDecision}">${labels[thisDecision]}</span>`;
+      const overrideKey = `${workout}_${week}_${ex.name}`;
+      const isOverride = state.overrides && state.overrides[overrideKey];
+      badgeHtml = `<button class="decision-badge ${thisDecision}${isOverride ? ' overridden' : ''}"
+        onclick="openOverrideModal('${workout}', ${week}, '${ex.name.replace(/'/g, "\\'")}', '${thisDecision}')"
+        title="${isOverride ? 'Override manual activ' : 'Apasă pentru a schimba'}">
+        ${labels[thisDecision]}${isOverride ? ' ✎' : ''}
+      </button>`;
     }
 
     html += `
@@ -1023,8 +1070,44 @@ function renderOverview() {
 
 
 // ============================================================
-// PHOTOS
+// OVERRIDE MODAL
 // ============================================================
+
+let _modalCtx = null;
+
+function openOverrideModal(workout, week, exName, currentDecision) {
+  _modalCtx = { workout, week, exName };
+  document.getElementById('modalExName').textContent = exName;
+  const modal = document.getElementById('overrideModal');
+  modal.style.display = 'flex';
+}
+
+function closeOverrideModal() {
+  document.getElementById('overrideModal').style.display = 'none';
+  _modalCtx = null;
+}
+
+function setOverride(decision) {
+  if (!_modalCtx) return;
+  const { workout, week, exName } = _modalCtx;
+  const key = `${workout}_${week}_${exName}`;
+  if (!state.overrides) state.overrides = {};
+  if (decision === null) {
+    delete state.overrides[key];
+  } else {
+    state.overrides[key] = decision;
+  }
+  saveState();
+  closeOverrideModal();
+  renderMain();
+}
+
+// Close modal on backdrop click
+document.getElementById('overrideModal').addEventListener('click', function(e) {
+  if (e.target === this) closeOverrideModal();
+});
+
+
 
 function savePhoto(workout, week, input) {
   const file = input.files[0];
